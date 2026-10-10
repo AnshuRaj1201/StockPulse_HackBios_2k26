@@ -1,0 +1,180 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         String   @default("staff") // "admin", "staff", "viewer"
+  department   String   @default("General")
+  createdAt    DateTime @default(now())
+}
+
+model Item {
+  id                 String                 @id @default(uuid())
+  sku                String                 @unique
+  barcode            String                 @unique
+  name               String
+  category           String
+  department         String
+  unit               String                 @default("units")
+  currentStock       Int                    @default(0)
+  minThreshold       Int                    @default(10)
+  safetyStock        Int                    @default(5)
+  leadTimeDays       Int                    @default(4)
+  unitCost           Float                  @default(0.0)
+  supplierName       String                 @default("Campus Vendor")
+  supplierEmail      String                 @default("orders@vendor.example.com")
+  supplierPhone      String                 @default("+91 98765 43210")
+  batches            Batch[]
+  transactions       StockTransaction[]
+  reorders           ReorderSuggestion[]
+  supplierQuotes     SupplierQuote[]
+  dealerDispatches   DealerDispatchOrder[]
+  subscriptions      RecurringSubscription[]
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+}
+
+model Batch {
+  id              String             @id @default(uuid())
+  itemId          String
+  item            Item               @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  batchNumber     String
+  quantity        Int
+  initialQuantity Int
+  mfgDate         DateTime?
+  expiryDate      DateTime?
+  location        String             @default("Main Storage")
+  status          String             @default("ACTIVE") // ACTIVE, DEPLETED, EXPIRED
+  transactions    StockTransaction[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model StockTransaction {
+  id            String   @id @default(uuid())
+  itemId        String
+  item          Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  batchId       String?
+  batch         Batch?   @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  type          String   // "IN", "OUT", "ADJUST", "WASTE", "RECURRING_DELIVERY"
+  quantity      Int
+  previousStock Int
+  newStock      Int
+  reason        String   @default("Routine Usage")
+  performedBy   String   @default("Staff")
+  timestamp     DateTime @default(now())
+}
+
+model ReorderSuggestion {
+  id                   String   @id @default(uuid())
+  itemId               String
+  item                 Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  suggestedQuantity   Int
+  estimatedCost        Float
+  avgDailyUsage        Float    @default(1.0)
+  daysUntilStockout    Float    @default(3.0)
+  status               String   @default("DRAFT") // DRAFT, APPROVED, ORDERED, RECEIVED, REJECTED
+  urgency              String   @default("HIGH") // CRITICAL, HIGH, MEDIUM, LOW
+  notes                String   @default("")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model Supplier {
+  id               String                @id @default(uuid())
+  name             String
+  code             String                @unique
+  contactPerson    String
+  email            String
+  phone            String
+  rating           Float                 @default(4.5)
+  reliabilityRate  Float                 @default(95.0) // On-time delivery % based on recorded past shipments
+  defectRate       Float                 @default(1.0)  // Product return / defect % based on quality audit
+  avgLeadDays      Int                   @default(3)
+  location         String                @default("Industrial Area")
+  verified         Boolean               @default(true)
+  quotes           SupplierQuote[]
+  dispatches       DealerDispatchOrder[]
+  createdAt        DateTime              @default(now())
+}
+
+model SupplierQuote {
+  id           String   @id @default(uuid())
+  itemId       String
+  item         Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  supplierId   String
+  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  unitPrice    Float
+  deliveryDays Int
+  minOrderQty  Int      @default(1)
+  isPreferred  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+}
+
+model DealerDispatchOrder {
+  id                   String    @id @default(uuid())
+  itemId               String
+  item                 Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  supplierId           String
+  supplier             Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  quantity             Int
+  unitPrice            Float
+  totalCost            Float
+  status               String    @default("AUTO_DISPATCHED") // AUTO_DISPATCHED, ACKNOWLEDGED, SHIPPED, DELIVERED, CANCELLED
+  triggerType          String    @default("AUTO_LOW_STOCK")  // AUTO_LOW_STOCK, MANUAL_AI_RECOMMENDED
+  dispatchMessage      String
+  dealerContactEmail   String
+  dispatchedAt         DateTime  @default(now())
+  expectedDeliveryDate DateTime?
+}
+
+model RecurringSubscription {
+  id                 String                     @id @default(uuid())
+  customerName       String
+  customerEmail      String
+  customerPhone      String
+  itemId             String
+  item               Item                       @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  quantity           Int                        @default(1)
+  dayOfMonth         Int                        @default(5) // e.g. 5 for 5th of every month
+  customerPermission Boolean                    @default(true)
+  status             String                     @default("ACTIVE") // ACTIVE, PAUSED, CANCELLED
+  destination        String                     @default("Campus Health Dispensary")
+  notes              String                     @default("Monthly essential delivery")
+  lastDeliveredDate  DateTime?
+  nextDeliveryDate   DateTime?
+  deliveryLogs       SubscriptionDeliveryLog[]
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+}
+
+model SubscriptionDeliveryLog {
+  id             String                @id @default(uuid())
+  subscriptionId String
+  subscription   RecurringSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  executedAt     DateTime              @default(now())
+  quantity       Int
+  status         String                @default("SUCCESS") // SUCCESS, INSUFFICIENT_STOCK, PERMISSION_REVOKED
+  stockBefore    Int
+  stockAfter     Int
+  message        String
+}
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  action      String   // CREATE, UPDATE, DELETE, STOCK_IN, STOCK_OUT, REORDER_APPROVED, DEALER_DISPATCH, RECURRING_DELIVERY
+  entity      String   // Item, Batch, Reorder, User, Supplier, Subscription
+  entityId    String
+  details     String
+  performedBy String
+  createdAt   DateTime @default(now())
+}
